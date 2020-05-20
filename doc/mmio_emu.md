@@ -1,20 +1,32 @@
 # RFC: Tock interface for MMIO device emulation
 
 ## Motivation
-As part of the "On-Host Testing Framework" requirement from the [Tock on OpenTitan Roadmap
-](https://github.com/tock/tock/blob/f4779c078f3ead673d10cf3a1fd8437a61702f96/doc/wg/opentitan/roadmap.md), we would like to provide a way for capsules to use emulated or mock implementations of MMIO devices for host-side testing. 
 
-Host-side testing is a broad category that could include booting TockOS in verilator, a qemu-like emulator, or running TockOS applications on the host's native architecture. This document focuses on changes to the MMIO register interface that would unblock unit testing in capsules that use MMIO.
+As part of the "On-Host Testing Framework" requirement from the [Tock on
+OpenTitan
+Roadmap](https://github.com/tock/tock/blob/f4779c078f3ead673d10cf3a1fd8437a61702f96/doc/wg/opentitan/roadmap.md), 
+we would like to provide a way for capsules to use emulated or mock
+implementations of MMIO devices for host-side testing. 
+
+Host-side testing is a broad category that could include booting TockOS in
+verilator, a qemu-like emulator, or running TockOS applications on the host's
+native architecture. This document focuses on changes to the MMIO register
+interface that would unblock unit testing in capsules that use MMIO.
 
 ## Background
-TockOS has built a [register abstraction](https://github.com/tock/tock/tree/db843ee15bfc6beceef367c4ade3e6cd24adebc6/libraries/tock-register-interface/README.md) that provides a level of safety on top of performing voltaile reads and writes to arbitrary memory addresses.
 
-[`libraries/tock-register-interface/src/registers.rs`](https://github.com/tock/tock/blob/master/libraries/tock-register-interface/src/registers.rs)
+TockOS has built a [register
+abstraction](https://github.com/tock/tock/tree/db843ee15bfc6beceef367c4ade3e6cd24adebc6/libraries/tock-register-interface/README.md)
+that provides a level of safety on top of performing voltaile reads and writes
+to arbitrary memory addresses.
 
-```rust
+[ `libraries/tock-register-interface/src/registers.rs` 
+](https://github.com/tock/tock/blob/master/libraries/tock-register-interface/src/registers.rs)
+
+``` rust
 /// Read/Write registers.
 // To successfully alias this structure onto hardware registers in memory, this
-// struct must be exactly the size of the `T`.
+// struct must be exactly the size of the `T` .
 #[repr(transparent)]
 pub struct ReadWrite<T: IntLike, R: RegisterLongName = ()> {
     value: T,
@@ -40,8 +52,10 @@ impl<T: IntLike, R: RegisterLongName> ReadWrite<T, R> {
 
 Here's what it looks like in practice:
 
-[`chips/sifive/src/uart.rs`](https://github.com/tock/tock/blob/7efc61a96fe38d908d03221d5d567da32d91ada1/chips/sifive/src/uart.rs#L13)
-```rust
+[ `chips/sifive/src/uart.rs` 
+](https://github.com/tock/tock/blob/7efc61a96fe38d908d03221d5d567da32d91ada1/chips/sifive/src/uart.rs#L13)
+
+``` rust
 #[repr(C)]
 pub struct UartRegisters {
     /// Transmit Data Register
@@ -102,8 +116,10 @@ pub struct Uart<'a> {
 }
 ```
 
-[`chips/e310x/src/uart.rs`](https://github.com/tock/tock/blob/7efc61a96fe38d908d03221d5d567da32d91ada1/chips/e310x/src/uart.rs)
-```rust
+[ `chips/e310x/src/uart.rs` 
+](https://github.com/tock/tock/blob/7efc61a96fe38d908d03221d5d567da32d91ada1/chips/e310x/src/uart.rs)
+
+``` rust
 //! UART instantiation.
 
 use kernel::common::StaticRef;
@@ -115,14 +131,24 @@ const UART0_BASE: StaticRef<UartRegisters> =
     unsafe { StaticRef::new(0x1001_3000 as *const UartRegisters) };
 ```
 
-The TockOS abstraction aliases a struct on top of MMIO memory. This fits MMIO registers into Rust's memory safety model. From the client's perspective, only the aliasing of the struct over an existing MMIO region is considered unsafe. The client must be certain that the struct layout matches the MMIO region exactly.
+The TockOS abstraction aliases a struct on top of MMIO memory. This fits MMIO
+registers into Rust's memory safety model. From the client's perspective, only
+the aliasing of the struct over an existing MMIO region is considered unsafe.
+The client must be certain that the struct layout matches the MMIO region
+exactly.
 
-Not every driver uses the `tock-registers` crate. Many use [`VolatileCell`](https://github.com/tock/tock/blob/27d6bd11f9a618d75bcdc0edd9993c218111932a/doc/Mutable_References.md#volatilecell) in their own `#[repr(C)]` structs, sometimes in conjunction with the `tock-registers` crates.
+Not every driver uses the `tock-registers` crate. Many use [ `VolatileCell` 
+](https://github.com/tock/tock/blob/27d6bd11f9a618d75bcdc0edd9993c218111932a/doc/Mutable_References.md#volatilecell)
+in their own `#[repr(C)]` structs, sometimes in conjunction with the
+`tock-registers` crates.
 
 ## Proposal: Add `mmio_emu` feature to the `tock-registers` crate
-With this approach, we keep the interface for existing capsules the same. Rather than invoking `ptr::{read,write}_volatile` directly, register implementations will invoke a wrapper function.
 
-```rust
+With this approach, we keep the interface for existing capsules the same. Rather
+than invoking `ptr::{read,write}_volatile` directly, register implementations
+will invoke a wrapper function.
+
+``` rust
 pub fn get(&self) -> T {
     unsafe { mmio::read_volatile(&self.value) }
 }
@@ -132,32 +158,52 @@ pub fn set(&self, value: T) {
 }
 ```
 
-The `mmio` module behavior can be configured via cargo features to enable or disable MMIO emulation:
+The `mmio` module behavior can be configured via cargo features to enable or
+disable MMIO emulation:
 
-```rust
+``` rust
 #[cfg_attr(not(feature = "mmio_emu"), path = "mmio.rs")]
 #[cfg_attr(feature = "mmio_emu", path = "mmio_emu.rs")]
 pub mod mmio;
 ```
 
-Boards running TockOS would have no need for the `mmio_emu` feature and would end up invoking the same `ptr::{read,write}_volatile` functions that they do now.
+Boards running TockOS would have no need for the `mmio_emu` feature and would
+end up invoking the same `ptr::{read,write}_volatile` functions that they do
+now.
 
-Unit tests on the host can enable `mmio_emu` to allow emulation of MMIO registers.
+Unit tests on the host can enable `mmio_emu` to allow emulation of MMIO
+registers.
 
-Proof-of-concept implementation at https://github.com/smibarber/tock/blob/mmio-emulation/libraries/tock-register-interface/src/mmio_emu.rs
+Proof-of-concept implementation at
+https://github.com/smibarber/tock/blob/mmio-emulation/libraries/tock-register-interface/src/mmio_emu.rs
 
 Pros:
-* No changes required to register interface, so existing capsules can work with emulation.
-* Ease of implementation. No large refactoring or API migration needed, unless migrating drivers from direct `VolatileCell` usage to `tock-registers`.
+
+* No changes required to register interface, so existing capsules can work with
+
+  emulation.
+
+* Ease of implementation. No large refactoring or API migration needed, unless
+
+  migrating drivers from direct `VolatileCell` usage to `tock-registers` .
 
 Cons:
-* Requires MMIO regions to be registered globally. This creates more overhead in unit testing since an MMIO access must be translated back from a global address into its device and offset.
-* Awkward interface for users creating a fake MMIO device. Users must declare a `static` item for each emulated device to reserve its address range and to be able to create a `StaticRef<Registers>` for capsules.
+
+* Requires MMIO regions to be registered globally. This creates more overhead in
+
+  unit testing since an MMIO access must be translated back from a global
+  address into its device and offset.
+
+* Awkward interface for users creating a fake MMIO device. Users must declare a
+
+`static` item for each emulated device to reserve its address range and to be
+  able to create a `StaticRef<Registers>` for capsules.
+
 * Selecting between passthrough/emulation with a cargo feature is a bit kludgy.
 
 Example use:
 
-```rust
+``` rust
 #[test]
 fn counter_device() {
     // Declare a global instance of CounterRegisters to reserve an address range for testing.
@@ -180,31 +226,51 @@ fn counter_device() {
 ## Alternatives considered
 
 ### Traitify register interface
-Existing TockOS capsules usually hold a reference directly to the MMIO region, such as `StaticRef<FooRegisters>`. The capsules then access struct fields directly and invoke methods on them.
+Existing TockOS capsules usually hold a reference directly to the MMIO region, 
+such as `StaticRef<FooRegisters>` . The capsules then access struct fields
+directly and invoke methods on them.
 
-Instead, we want to hide the implementation details of accessing registers behind traits. A driver can then be insulated from the implementation details of accessing the registers, in particular the `StaticRef<FooRegisters>` which requires a static MMIO region.
+Instead, we want to hide the implementation details of accessing registers
+behind traits. A driver can then be insulated from the implementation details of
+accessing the registers, in particular the `StaticRef<FooRegisters>` which
+requires a static MMIO region.
 
-We'll ignore the problem of bitfields within a register for now, and think about a simple device `Foo` with one read/write `u32` control register. A minimal `FooRegisters` trait to start with might look like this.
-```rust
+We'll ignore the problem of bitfields within a register for now, and think about
+a simple device `Foo` with one read/write `u32` control register. A minimal
+`FooRegisters` trait to start with might look like this.
+
+``` rust
 pub trait FooRegisters {
     fn set_control(&self, val: u32);
     fn control(&self) -> u32;
 }
 ```
 
-This works at the most basic level, but has lost the additional helper methods that the `ReadWrite` struct has, in particular being able to read or write an enum. We could return a proxy object instead that implements a `ReadWrite` trait.
-```rust
+This works at the most basic level, but has lost the additional helper methods
+that the `ReadWrite` struct has, in particular being able to read or write an
+enum. We could return a proxy object instead that implements a `ReadWrite` 
+trait.
+
+``` rust
 pub trait ReadWrite<T: IntLike> {...}
 pub trait FooRegisters {
     fn control(&self) -> &ReadWrite<u32>;
 }
 ```
 
-However, this returns a trait object. We want to avoid dynamic dispatch, which would add unnecessary code bloat and overhead to each MMIO register access. Static dispatch is preferable, since it gives the compiler and LTO maximum flexibility to optimize.
+However, this returns a trait object. We want to avoid dynamic dispatch, which
+would add unnecessary code bloat and overhead to each MMIO register access.
+Static dispatch is preferable, since it gives the compiler and LTO maximum
+flexibility to optimize.
 
-An associated type would allow impls of `FooRegisters` to pick either "real" or "fake" register implementations, and still allows for static dispatch. But since register wrappers require a type parameter, this depends on [generic associated types (GATs)](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md#associated-type-constructors-of-type-arguments) which has not yet been fully implemented.
+An associated type would allow impls of `FooRegisters` to pick either "real" or
+"fake" register implementations, and still allows for static dispatch. But since
+register wrappers require a type parameter, this depends on [generic associated
+types
+(GATs)](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md#associated-type-constructors-of-type-arguments)
+which has not yet been fully implemented.
 
-```rust
+``` rust
 pub trait ReadWrite<T: IntLike> {...}
 
 pub trait FooRegisters {
@@ -220,19 +286,32 @@ impl FooRegisters for FooRegistersWrapper {
 ```
 
 Pros:
-* Capsules are abstracted away from the implementation details of the `tock-registers` crate.
+
+* Capsules are abstracted away from the implementation details of the
+
+`tock-registers` crate.
+
 * Easy to create fake or emulated instances for testing.
 
 Cons:
-* A clean implementation would require [generic associated types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md), which are not yet fully implemented or stable.
+
+* A clean implementation would require [generic associated
+
+  types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md), 
+  which are not yet fully implemented or stable.
+
 * Changes API substantially for existing capsules.
-* Additional layers make it more difficult to reason that register access overhead compiles down to the same optimal loads and stores.
+* Additional layers make it more difficult to reason that register access
+
+  overhead compiles down to the same optimal loads and stores.
 
 ### Traitify register implementations
 
-We keep the existing `#[repr(C)]` structs, but add a type parameter that allows substituting in a fake or real register implementation. This keeps the interface for existing drivers largely the same.
+We keep the existing `#[repr(C)]` structs, but add a type parameter that allows
+substituting in a fake or real register implementation. This keeps the interface
+for existing drivers largely the same.
 
-```rust
+``` rust
 trait RegType<T: IntLike> {
     fn set(&self, value: T);
     fn get(&self) -> T;
@@ -256,4 +335,6 @@ struct FooRegisters<RT: RegType> {
 }
 ```
 
-This requires [higher kinded types](https://github.com/rust-lang/rfcs/issues/324). The trait bound on `RT` for `ReadWrite` cannot itself take a type parameter.
+This requires [higher kinded
+types](https://github.com/rust-lang/rfcs/issues/324). The trait bound on `RT` 
+for `ReadWrite` cannot itself take a type parameter.
