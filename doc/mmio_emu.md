@@ -227,3 +227,33 @@ Cons:
 * A clean implementation would require [generic associated types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md), which are not yet fully implemented or stable.
 * Changes API substantially for existing capsules.
 * Additional layers make it more difficult to reason that register access overhead compiles down to the same optimal loads and stores.
+
+### Traitify register implementations
+
+We keep the existing `#[repr(C)]` structs, but add a type parameter that allows substituting in a fake or real register implementation. This keeps the interface for existing drivers largely the same.
+
+```rust
+trait RegType<T: IntLike> {
+    fn set(&self, value: T);
+    fn get(&self) -> T;
+}
+
+#[repr(transparent)]
+pub struct RealRegister<T: IntLike> {
+    value: T,
+}
+
+impl<T: IntLike> RegType for RealRegister<T> {...}
+
+#[repr(transparent)]
+pub struct ReadWrite<T: IntLike, RT: RegType> {
+    value: RT<T>,
+    associated_register: PhantomData<R>,
+}
+
+struct FooRegisters<RT: RegType> {
+    control: ReadWrite<u32, RT>,
+}
+```
+
+This requires [higher kinded types](https://github.com/rust-lang/rfcs/issues/324). The trait bound on `RT` for `ReadWrite` cannot itself take a type parameter.
