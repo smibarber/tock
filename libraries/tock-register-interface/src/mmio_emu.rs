@@ -232,7 +232,7 @@ fn get_mmio_state() -> &'static Mutex<MmioEmu> {
 /// let device = Arc::new(Mutex::new(FooDevice::new()));
 /// mmio::register_mmio_device(device, &FOO_REGS).unwrap();
 /// ```
-pub fn register_mmio_device<R: 'static + Sized>(
+pub fn register_mmio_device<R: 'static>(
     device: Arc<Mutex<dyn MmioDevice>>,
     registers: &'static R,
 ) -> Result<()> {
@@ -254,7 +254,7 @@ pub fn register_mmio_device<R: 'static + Sized>(
 /// # Panics
 ///
 /// Panics if there is no device associated with the address.
-pub(crate) unsafe fn read_volatile<T: IntLike + Sized>(src: *const T) -> T {
+pub(crate) unsafe fn read_volatile<T: IntLike>(src: *const T) -> T {
     let mut result = T::zero();
     let bytes_slice = slice::from_raw_parts_mut(&mut result as *mut T as *mut u8, size_of::<T>());
     let mmio_state = get_mmio_state().lock().unwrap();
@@ -269,7 +269,7 @@ pub(crate) unsafe fn read_volatile<T: IntLike + Sized>(src: *const T) -> T {
 /// # Panics
 ///
 /// Panics if there is no device associated with the address.
-pub(crate) unsafe fn write_volatile<T: IntLike + Sized>(dst: *mut T, src: T) {
+pub(crate) unsafe fn write_volatile<T: IntLike>(dst: *mut T, src: T) {
     let bytes_slice = slice::from_raw_parts(&src as *const T as *const u8, size_of::<T>());
     let mmio_state = get_mmio_state().lock().unwrap();
     mmio_state.write(dst as usize, bytes_slice);
