@@ -5,19 +5,19 @@
 As part of the "On-Host Testing Framework" requirement from the [Tock on
 OpenTitan
 Roadmap](https://github.com/tock/tock/blob/f4779c078f3ead673d10cf3a1fd8437a61702f96/doc/wg/opentitan/roadmap.md), 
-we would like to provide a way for capsules to use emulated or mock
+we would like to provide a way for drivers to use emulated or mock
 implementations of MMIO devices for host-side testing. 
 
 Host-side testing is a broad category that could include booting TockOS in
 verilator, a qemu-like emulator, or running TockOS applications on the host's
 native architecture. This document focuses on changes to the MMIO register
-interface that would unblock unit testing in capsules that use MMIO.
+interface that would unblock unit testing in drivers that use MMIO.
 
 ## Background
 
 TockOS has built a [register
 abstraction](https://github.com/tock/tock/tree/db843ee15bfc6beceef367c4ade3e6cd24adebc6/libraries/tock-register-interface/README.md)
-that provides a level of safety on top of performing voltaile reads and writes
+that provides a level of safety on top of performing volatile reads and writes
 to arbitrary memory addresses.
 
 [ `libraries/tock-register-interface/src/registers.rs` 
@@ -140,7 +140,7 @@ exactly.
 Not every driver uses the `tock-registers` crate. Many use [ `VolatileCell` 
 ](https://github.com/tock/tock/blob/27d6bd11f9a618d75bcdc0edd9993c218111932a/doc/Mutable_References.md#volatilecell)
 in their own `#[repr(C)]` structs, sometimes in conjunction with the
-`tock-registers` crates.
+`tock-registers` crates. Supporting drivers that use other inte
 
 ## Proposal: Add `mmio_emu` feature to the `tock-registers` crate
 
@@ -179,7 +179,7 @@ https://github.com/smibarber/tock/blob/mmio-emulation/libraries/tock-register-in
 
 Pros:
 
-* No changes required to register interface, so existing capsules can work with
+* No changes required to register interface, so existing drivers that use the `tock-registers` interface can work with
 
   emulation.
 
@@ -206,14 +206,17 @@ Example use:
 ``` rust
 #[test]
 fn counter_device() {
-    // Declare a global instance of CounterRegisters to reserve an address range for testing.
+    // Declare a global instance of CounterRegisters to reserve an address
+    // range for testing.
     static FAKE_REGS: MaybeUninit<CounterRegisters> = MaybeUninit::uninit();
-    let device = Arc::new(Mutex::new(TestDevice{value: 0}));
-    register_mmio_device(device, &FAKE_REGS).unwrap();
 
-    // HACK: Take a reference to the CounterRegisters struct.
-    // This is UB since it's uninitialized, but we never actually access this memory.
+    // Take a reference to the CounterRegisters struct.
+    // Technically this is UB since it's uninitialized, but we never actually
+    // access this memory.
     let regs = unsafe { &*FAKE_REGS.as_ptr() };
+
+    let device = Arc::new(Mutex::new(CounterDevice::new()));
+    register_mmio_device(device, &FAKE_REGS).unwrap();
 
     assert_eq!(regs.counter.get(), 0);
     regs.increment.set(5);
@@ -226,6 +229,7 @@ fn counter_device() {
 ## Alternatives considered
 
 ### Traitify register interface
+
 Existing TockOS capsules usually hold a reference directly to the MMIO region, 
 such as `StaticRef<FooRegisters>` . The capsules then access struct fields
 directly and invoke methods on them.
@@ -287,7 +291,7 @@ impl FooRegisters for FooRegistersWrapper {
 
 Pros:
 
-* Capsules are abstracted away from the implementation details of the
+* Drivers are abstracted away from the implementation details of the
 
 `tock-registers` crate.
 
@@ -325,16 +329,34 @@ pub struct RealRegister<T: IntLike> {
 impl<T: IntLike> RegType for RealRegister<T> {...}
 
 #[repr(transparent)]
-pub struct ReadWrite<T: IntLike, RT: RegType> {
+pub struct ReadWrite<T: IntLike, RT: RegType<T>> {
     value: RT<T>,
     associated_register: PhantomData<R>,
 }
+// And the same for ReadOnly, WriteOnly, etc.
 
-struct FooRegisters<RT: RegType> {
+// The above works fine, but how do we pass in a RegType as a type parameter
+// to a FooRegisters struct?
+
+// Here's one option, but the limitation is that T here isn't generic within
+// the struct! The caller picks a concrete T and all uses of RegType inside
+// the struct must use the same concrete T.
+struct FooRegisters<T: IntLike, RegType<T>> {
+    // These fields won't work since u32 and u64 may not be the same type as T.
     control: ReadWrite<u32, RT>,
+    status:  ReadOnly<u64, RT>,
+}
+
+// This version allows RT to be generic over any T: IntLike.
+// However, this requires higher rank trait bounds to work for types, not just
+// lifetimes as they do now.
+struct FooRegisters<RT>
+where for<T: IntLike> RT: RegType<T> {
+    // These fields work, since u32 and u64 both have IntLike impls.
+    control: ReadWrite<u32, RT>,
+    status:  ReadOnly<u64, RT>,
 }
 ```
 
-This requires [higher kinded
-types](https://github.com/rust-lang/rfcs/issues/324). The trait bound on `RT` 
-for `ReadWrite` cannot itself take a type parameter.
+We cannot pass in a generic `RegType` as a type parameter to `FooRegisters` in current Rust. This requires some form of [higher kinded
+types](https://github.com/rust-lang/rfcs/issues/324). The syntax above was borrowed from [Higher-Rank Trait Bounds](https://doc.rust-lang.org/stable/nomicon/hrtb.html).

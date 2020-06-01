@@ -3,8 +3,7 @@
 //!
 
 #![feature(const_fn)]
-
-#[cfg_attr(not(feature = "mmio_emu"), no_std)]
+#![cfg_attr(not(feature = "mmio_emu"), no_std)]
 
 pub mod macros;
 pub mod registers;
