@@ -179,25 +179,15 @@ https://github.com/smibarber/tock/blob/mmio-emulation/libraries/tock-register-in
 
 Pros:
 
-* No changes required to register interface, so existing drivers that use the `tock-registers` interface can work with
+* No changes required to register interface, so existing drivers that use the `tock-registers` interface can work with emulation.
 
-  emulation.
-
-* Ease of implementation. No large refactoring or API migration needed, unless
-
-  migrating drivers from direct `VolatileCell` usage to `tock-registers` .
+* Ease of implementation. No large refactoring or API migration needed, unless migrating drivers from direct `VolatileCell` usage to `tock-registers` .
 
 Cons:
 
-* Requires MMIO regions to be registered globally. This creates more overhead in
+* Requires MMIO regions to be registered globally. This creates more overhead in unit testing since an MMIO access must be translated back from a global address into its device and offset.
 
-  unit testing since an MMIO access must be translated back from a global
-  address into its device and offset.
-
-* Awkward interface for users creating a fake MMIO device. Users must declare a
-
-`static` item for each emulated device to reserve its address range and to be
-  able to create a `StaticRef<Registers>` for capsules.
+* Awkward interface for users creating a fake MMIO device. Users must declare a `static` item for each emulated device to reserve its address range and to be able to create a `StaticRef<Registers>` for capsules.
 
 * Selecting between passthrough/emulation with a cargo feature is a bit kludgy.
 
@@ -269,10 +259,8 @@ flexibility to optimize.
 
 An associated type would allow impls of `FooRegisters` to pick either "real" or
 "fake" register implementations, and still allows for static dispatch. But since
-register wrappers require a type parameter, this depends on [generic associated
-types
-(GATs)](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md#associated-type-constructors-of-type-arguments)
-which has not yet been fully implemented.
+register wrappers require a type parameter, this depends on [generic associated types (GATs)](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md#associated-type-constructors-of-type-arguments)
+which have not yet been fully implemented.
 
 ``` rust
 pub trait ReadWrite<T: IntLike> {...}
@@ -291,23 +279,17 @@ impl FooRegisters for FooRegistersWrapper {
 
 Pros:
 
-* Drivers are abstracted away from the implementation details of the
-
-`tock-registers` crate.
+* Drivers are abstracted away from the implementation details of the `tock-registers` crate.
 
 * Easy to create fake or emulated instances for testing.
 
 Cons:
 
-* A clean implementation would require [generic associated
-
-  types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md), 
-  which are not yet fully implemented or stable.
+* A clean implementation would require [generic associated types](https://github.com/rust-lang/rfcs/blob/master/text/1598-generic_associated_types.md), which are not yet fully implemented or stable.
 
 * Changes API substantially for existing capsules.
-* Additional layers make it more difficult to reason that register access
 
-  overhead compiles down to the same optimal loads and stores.
+* Additional layers make it more difficult to reason that register access overhead compiles down to the same optimal loads and stores.
 
 ### Traitify register implementations
 
