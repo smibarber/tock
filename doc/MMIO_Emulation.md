@@ -142,7 +142,9 @@ Not every driver uses the `tock-registers` crate. Many use [ `VolatileCell`
 in their own `#[repr(C)]` structs, sometimes in conjunction with the
 `tock-registers` crates. Supporting drivers that use other inte
 
-## Proposal: Add `mmio_emu` feature to the `tock-registers` crate
+## Proposal
+
+### Global MMIO device registration; add `mmio_emu` feature to the `tock-registers` crate.
 
 With this approach, we keep the interface for existing capsules the same. Rather
 than invoking `ptr::{read,write}_volatile` directly, register implementations
@@ -281,7 +283,7 @@ Pros:
 
 * Drivers are abstracted away from the implementation details of the `tock-registers` crate.
 
-* Easy to create fake or emulated instances for testing.
+* Easy to create fake or emulated instances for testing. No `StaticRef` is required.
 
 Cons:
 
@@ -342,3 +344,29 @@ where for<T: IntLike> RT: RegType<T> {
 
 We cannot pass in a generic `RegType` as a type parameter to `FooRegisters` in current Rust. This requires some form of [higher kinded
 types](https://github.com/rust-lang/rfcs/issues/324). The syntax above was borrowed from [Higher-Rank Trait Bounds](https://doc.rust-lang.org/stable/nomicon/hrtb.html).
+
+### Use conditional compilation to replace register structs
+
+The `ReadWrite` , `ReadOnly` , and other register structs could conditionally be 
+replaced with versions that call into MMIO emulation functions.
+
+``` rust
+#[cfg(feature = "mmio_emu")]
+pub struct ReadWrite<T: IntLike, R: RegisterLongName = ()> {
+    device: Arc<Mutex<dyn MmioDevice>>,
+    reg_offset: usize,
+    value: PhantomData<T>,
+    associated_register: PhantomData<R>,
+}
+```
+
+This avoids the need to register devices globally. It does not eliminate the
+need to create a static item for each test, since drivers still use `StaticRef` .
+
+One difficulty with writing this is that the register offsets are implicitly encoded
+in the layout of the overall register block struct. Changing the size of the struct
+(formerly `#[repr(transparent)]` for `T` ) means that the register offsets must
+instead be initialized by some constructor.
+
+The `register_structs!` macro does have offset information, so it could generate the
+required constructor.
